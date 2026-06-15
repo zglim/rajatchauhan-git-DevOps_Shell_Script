@@ -1,0 +1,7 @@
+sample1.txt
+sample2.txt
+
+
+# This is a comment
+  # Indented comment
+nonexistent_file.txt
