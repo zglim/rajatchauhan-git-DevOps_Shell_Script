@@ -1,0 +1,9 @@
+# This is a comment line — should be skipped
+file_a.txt
+
+   # Another comment with leading whitespace — should be skipped
+
+file_b.txt
+
+
+no_such_file.txt
