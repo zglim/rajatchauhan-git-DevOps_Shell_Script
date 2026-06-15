@@ -1,38 +1,89 @@
 #!/bin/bash
 
-# Check if directory path is provided as an argument
+# Maximum number of backup directories to retain
+MAX_BACKUPS=3
+
+# --- Parameter validation ---
 if [ -z "$1" ]; then
     echo "Usage: $0 <directory_path>"
     exit 1
 fi
 
-# Get the directory path from the first argument
-DIR_PATH=$1
+DIR_PATH="$1"
 
-# Check if the provided path is a directory
-if [ ! -d "$DIR_PATH" ]; then
-    echo "Error: $DIR_PATH is not a directory."
+if [ ! -e "$DIR_PATH" ]; then
+    echo "Error: '$DIR_PATH' does not exist."
     exit 1
 fi
 
-# Get the current timestamp
-TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
+if [ ! -d "$DIR_PATH" ]; then
+    echo "Error: '$DIR_PATH' is not a directory."
+    exit 1
+fi
 
-# Create the backup folder name with the timestamp
+if [ ! -r "$DIR_PATH" ]; then
+    echo "Error: '$DIR_PATH' is not readable."
+    exit 1
+fi
+
+# --- Create backup directory ---
+TIMESTAMP=$(date +"%Y-%m-%d_%H-%M-%S")
 BACKUP_FOLDER="$DIR_PATH/backup_$TIMESTAMP"
 
-# Create the backup folder
-mkdir -p "$BACKUP_FOLDER"
-
-# Copy all files from the specified directory to the backup folder
-cp -r "$DIR_PATH"/* "$BACKUP_FOLDER"
-
-# Print a message indicating the backup has been created
-echo "Backup created: $BACKUP_FOLDER"
-
-# Find and remove the oldest backups if there are more than 3
-BACKUP_COUNT=$(ls -d "$DIR_PATH"/backup_* | wc -l)
-if [ "$BACKUP_COUNT" -gt 3 ]; then
-    # Get the list of backups sorted by creation time and remove the oldest ones
-    ls -dt "$DIR_PATH"/backup_* | tail -n +4 | xargs rm -rf
+if ! mkdir -p "$BACKUP_FOLDER"; then
+    echo "Error: Failed to create backup directory '$BACKUP_FOLDER'."
+    exit 1
 fi
+
+# --- Copy source contents, excluding backup_* directories ---
+COPIED=0
+shopt -s dotglob  # include hidden files
+for item in "$DIR_PATH"/*; do
+    # When the directory is empty, the glob literal is returned unexpanded
+    [ -e "$item" ] || continue
+
+    basename="$(basename "$item")"
+
+    # Skip any existing backup_* directories to avoid recursive copy
+    case "$basename" in
+        backup_*) continue ;;
+    esac
+
+    if cp -r "$item" "$BACKUP_FOLDER/"; then
+        COPIED=$((COPIED + 1))
+    else
+        echo "Warning: failed to copy '$item'."
+    fi
+done
+shopt -u dotglob
+
+echo "Backup created: $BACKUP_FOLDER  ($COPIED item(s) copied)"
+
+# --- Rotation: keep only the newest MAX_BACKUPS backup directories ---
+# Collect only directories directly under DIR_PATH whose names match backup_YYYY-MM-DD_HH-MM-SS
+ALL_BACKUPS=()
+while IFS= read -r line; do
+    ALL_BACKUPS+=("$line")
+done < <(find "$DIR_PATH" -maxdepth 1 -type d -name 'backup_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' | sort)
+
+TOTAL=${#ALL_BACKUPS[@]}
+
+if [ "$TOTAL" -gt "$MAX_BACKUPS" ]; then
+    REMOVE_COUNT=$((TOTAL - MAX_BACKUPS))
+    echo "Rotating: removing $REMOVE_COUNT old backup(s)..."
+    for (( i=0; i<REMOVE_COUNT; i++ )); do
+        echo "  Removing: ${ALL_BACKUPS[$i]}"
+        rm -rf "${ALL_BACKUPS[$i]}"
+    done
+fi
+
+# --- Summary: list retained backups ---
+KEPT_BACKUPS=()
+while IFS= read -r line; do
+    KEPT_BACKUPS+=("$line")
+done < <(find "$DIR_PATH" -maxdepth 1 -type d -name 'backup_[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]_[0-9][0-9]-[0-9][0-9]-[0-9][0-9]' | sort)
+
+echo "Retained backups (${#KEPT_BACKUPS[@]}):"
+for b in "${KEPT_BACKUPS[@]}"; do
+    echo "  $b"
+done
